@@ -1,0 +1,42 @@
+name: Check and Transcribe New Videos
+
+on:
+  schedule:
+    - cron: '0 * * * *'   # every hour at :00
+  workflow_dispatch:       # allows manual trigger from the Actions UI
+
+permissions:
+  contents: write          # needed to push the transcript commits back
+
+jobs:
+  transcribe:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check for new videos and transcribe
+        id: transcribe
+        env:
+          CHANNEL_ID: ${{ vars.CHANNEL_ID }}
+        run: python scripts/check_and_transcribe.py
+
+      - name: Commit new transcripts
+        if: steps.transcribe.outputs.has_new == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add transcripts/ data/seen.json
+          git diff --cached --quiet || \
+            git commit -m "${{ steps.transcribe.outputs.commit_message }}"
+          git push
