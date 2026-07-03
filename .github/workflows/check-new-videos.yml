@@ -2,7 +2,7 @@ name: Check and Transcribe New Videos
 
 on:
   schedule:
-    - cron: '0 * * * *'   # every hour at :00
+    - cron: '0 9 * * *'   # daily at 09:00 UTC
   workflow_dispatch:       # allows manual trigger from the Actions UI
 
 permissions:
