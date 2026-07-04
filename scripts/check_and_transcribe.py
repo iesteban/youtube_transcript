@@ -94,9 +94,12 @@ def slugify(text: str) -> str:
 def download_audio(video_id: str, out_dir: str) -> Path:
     """Download the best available audio track with yt-dlp, return the file path."""
     opts = {
+        "format": "bestaudio/bestvideo+bestaudio/best/bestvideo",
         "outtmpl": f"{out_dir}/{video_id}.%(ext)s",
         "quiet": True,
         "no_warnings": True,
+        # Use the web player client — more reliable from cloud IPs
+        "extractor_args": {"youtube": {"player_client": ["web", "web_creator"]}},
     }
 
     # Write cookies to a temp file if provided (needed on cloud IPs blocked by YouTube)
