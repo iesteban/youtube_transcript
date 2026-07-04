@@ -225,6 +225,11 @@ def main() -> None:
     new_videos = [v for v in videos if v["id"] not in seen]
     print(f"Feed has {len(videos)} videos; {len(new_videos)} are new.")
 
+    MAX_PER_RUN = 3
+    if len(new_videos) > MAX_PER_RUN:
+        print(f"Capping to {MAX_PER_RUN} videos per run; {len(new_videos) - MAX_PER_RUN} will be retried next run.")
+        new_videos = new_videos[:MAX_PER_RUN]
+
     processed = []
     for video in new_videos:
         print(f"\nProcessing: {video['title']}  ({video['id']})")
