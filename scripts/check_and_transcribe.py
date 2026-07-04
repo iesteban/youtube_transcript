@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import shutil
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -162,9 +163,7 @@ def transcribe(video_id: str) -> str | None:
         return "\n\n".join(lines)
 
     finally:
-        if audio_path and audio_path.exists():
-            audio_path.unlink()
-        Path(tmp_dir).rmdir()
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def save_transcript(video: dict, text: str) -> Path:
