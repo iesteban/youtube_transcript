@@ -102,6 +102,10 @@ def download_audio(video_id: str, out_dir: str) -> Path:
         "extractor_args": {"youtube": {"player_client": ["web", "web_creator"]}},
     }
 
+    proxy = os.environ.get("PROXY_URL", "").strip()
+    if proxy:
+        opts["proxy"] = proxy
+
     # Write cookies to a temp file if provided (needed on cloud IPs blocked by YouTube)
     cookies_content = os.environ.get("YOUTUBE_COOKIES", "").strip()
     cookies_path = None

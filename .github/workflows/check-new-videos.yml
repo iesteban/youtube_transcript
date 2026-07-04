@@ -31,6 +31,7 @@ jobs:
           CHANNEL_ID: ${{ vars.CHANNEL_ID }}
           ASSEMBLYAI_API_KEY: ${{ secrets.ASSEMBLYAI_API_KEY }}
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+          PROXY_URL: ${{ secrets.PROXY_URL }}
         run: python scripts/check_and_transcribe.py
 
       - name: Commit new transcripts
