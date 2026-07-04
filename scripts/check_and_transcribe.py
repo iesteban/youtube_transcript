@@ -3,12 +3,11 @@
 Checks a YouTube channel RSS feed for new videos and saves their transcripts
 as Markdown files under transcripts/.
 
-Transcription is done via AssemblyAI (speaker diarization included).
-AssemblyAI fetches the audio directly from YouTube, so no local download
-or proxy is needed.
+Audio is downloaded with yt-dlp, uploaded to AssemblyAI, and transcribed
+with speaker diarization.
 
 Required env vars:
-  CHANNEL_ID        — YouTube channel ID (UC…) or handle (@name)
+  CHANNEL_ID         — YouTube channel ID (UC…) or handle (@name)
   ASSEMBLYAI_API_KEY — AssemblyAI API key
 """
 
@@ -16,11 +15,13 @@ import json
 import os
 import re
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import assemblyai as aai
 import requests
+import yt_dlp
 
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -90,40 +91,59 @@ def slugify(text: str) -> str:
     return text.strip("-")[:60]
 
 
+def download_audio(video_id: str, out_dir: str) -> Path:
+    """Download the best available audio track with yt-dlp, return the file path."""
+    opts = {
+        "format": "bestaudio[ext=m4a]/bestaudio/best",
+        "outtmpl": f"{out_dir}/{video_id}.%(ext)s",
+        "quiet": True,
+        "no_warnings": True,
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+        ext = info.get("ext", "m4a")
+    return Path(out_dir) / f"{video_id}.{ext}"
+
+
 def transcribe(video_id: str) -> str | None:
     """
-    Submit the YouTube URL to AssemblyAI and return a speaker-labelled transcript.
-    Returns None if the video is unavailable or has no audio.
-    Raises on transient API/network errors so the video is retried next run.
+    Download audio with yt-dlp, upload to AssemblyAI, return speaker-labelled transcript.
+    Returns None for permanent failures (video unavailable, no audio, etc.).
+    Raises on transient errors so the video is retried next run.
     """
-    youtube_url = f"https://www.youtube.com/watch?v={video_id}"
-    print(f"  Submitting to AssemblyAI: {youtube_url}")
-
-    config = aai.TranscriptionConfig(
-        speaker_labels=True,
-        language_code=LANGUAGE,
-    )
-    transcriber = aai.Transcriber(config=config)
-    result = transcriber.transcribe(youtube_url)
-
-    if result.status == aai.TranscriptStatus.error:
-        msg = result.error or "unknown error"
-        # Permanent failures (video unavailable, no audio track, etc.)
-        if any(k in msg.lower() for k in ("download", "audio", "media", "format", "unavailable")):
-            print(f"  Permanent error — skipping: {msg}")
+    tmp_dir = tempfile.mkdtemp()
+    audio_path = None
+    try:
+        print("  Downloading audio with yt-dlp …")
+        try:
+            audio_path = download_audio(video_id, tmp_dir)
+        except yt_dlp.utils.DownloadError as exc:
+            print(f"  Download failed — skipping: {exc}")
             return None
-        # Anything else is potentially transient — let it bubble up
-        raise RuntimeError(f"AssemblyAI error: {msg}")
 
-    if not result.utterances:
-        # Transcription succeeded but produced no speaker segments — return plain text
-        return result.text or ""
+        print(f"  Uploading to AssemblyAI ({audio_path.stat().st_size // 1024 // 1024} MB) …")
+        config = aai.TranscriptionConfig(
+            speaker_labels=True,
+            language_code=LANGUAGE,
+        )
+        transcriber = aai.Transcriber(config=config)
+        result = transcriber.transcribe(str(audio_path))
 
-    lines = [
-        f"**Speaker {u.speaker}:** {u.text}"
-        for u in result.utterances
-    ]
-    return "\n\n".join(lines)
+        if result.status == aai.TranscriptStatus.error:
+            msg = result.error or "unknown error"
+            print(f"  AssemblyAI error — skipping: {msg}")
+            return None
+
+        if not result.utterances:
+            return result.text or ""
+
+        lines = [f"**Speaker {u.speaker}:** {u.text}" for u in result.utterances]
+        return "\n\n".join(lines)
+
+    finally:
+        if audio_path and audio_path.exists():
+            audio_path.unlink()
+        Path(tmp_dir).rmdir()
 
 
 def save_transcript(video: dict, text: str) -> Path:
