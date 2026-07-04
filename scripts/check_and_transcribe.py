@@ -99,10 +99,24 @@ def download_audio(video_id: str, out_dir: str) -> Path:
         "quiet": True,
         "no_warnings": True,
     }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
-        ext = info.get("ext", "m4a")
-    return Path(out_dir) / f"{video_id}.{ext}"
+
+    # Write cookies to a temp file if provided (needed on cloud IPs blocked by YouTube)
+    cookies_content = os.environ.get("YOUTUBE_COOKIES", "").strip()
+    cookies_path = None
+    if cookies_content:
+        fd, cookies_path = tempfile.mkstemp(suffix=".txt")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(cookies_content)
+        opts["cookiefile"] = cookies_path
+
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+            ext = info.get("ext", "m4a")
+        return Path(out_dir) / f"{video_id}.{ext}"
+    finally:
+        if cookies_path:
+            Path(cookies_path).unlink(missing_ok=True)
 
 
 def transcribe(video_id: str) -> str | None:

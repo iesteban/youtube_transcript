@@ -30,6 +30,7 @@ jobs:
         env:
           CHANNEL_ID: ${{ vars.CHANNEL_ID }}
           ASSEMBLYAI_API_KEY: ${{ secrets.ASSEMBLYAI_API_KEY }}
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: python scripts/check_and_transcribe.py
 
       - name: Commit new transcripts
