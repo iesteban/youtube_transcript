@@ -99,7 +99,7 @@ def download_audio(video_id: str, out_dir: str) -> Path:
         "quiet": True,
         "no_warnings": True,
         # Use node.js to solve YouTube's n-challenge (requires yt-dlp[default] + Node 22+)
-        "js_runtimes": "node",
+        "js_runtimes": {"node": {}},
         "extractor_args": {"youtube": {"player_client": ["web", "web_creator"]}},
     }
 
