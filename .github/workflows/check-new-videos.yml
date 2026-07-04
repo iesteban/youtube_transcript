@@ -29,6 +29,7 @@ jobs:
         id: transcribe
         env:
           CHANNEL_ID: ${{ vars.CHANNEL_ID }}
+          ASSEMBLYAI_API_KEY: ${{ secrets.ASSEMBLYAI_API_KEY }}
         run: python scripts/check_and_transcribe.py
 
       - name: Commit new transcripts

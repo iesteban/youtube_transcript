@@ -3,8 +3,13 @@
 Checks a YouTube channel RSS feed for new videos and saves their transcripts
 as Markdown files under transcripts/.
 
-Channel ID is read from the CHANNEL_ID env var (preferred) or config.json.
-A YouTube handle (@name) is also accepted and resolved automatically.
+Transcription is done via AssemblyAI (speaker diarization included).
+AssemblyAI fetches the audio directly from YouTube, so no local download
+or proxy is needed.
+
+Required env vars:
+  CHANNEL_ID        — YouTube channel ID (UC…) or handle (@name)
+  ASSEMBLYAI_API_KEY — AssemblyAI API key
 """
 
 import json
@@ -14,14 +19,8 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import assemblyai as aai
 import requests
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api._errors import (
-    CouldNotRetrieveTranscript,
-    IpBlocked,
-    NoTranscriptFound,
-    TranscriptsDisabled,
-)
 
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -34,6 +33,8 @@ RSS_NS = {
     "atom": "http://www.w3.org/2005/Atom",
     "yt": "http://www.youtube.com/xml/schemas/2015",
 }
+
+LANGUAGE = "es"
 
 
 def resolve_channel_id(value: str) -> str:
@@ -89,32 +90,40 @@ def slugify(text: str) -> str:
     return text.strip("-")[:60]
 
 
-class TransientError(Exception):
-    """Raised for temporary failures (IP block, network error) — don't mark as seen."""
+def transcribe(video_id: str) -> str | None:
+    """
+    Submit the YouTube URL to AssemblyAI and return a speaker-labelled transcript.
+    Returns None if the video is unavailable or has no audio.
+    Raises on transient API/network errors so the video is retried next run.
+    """
+    youtube_url = f"https://www.youtube.com/watch?v={video_id}"
+    print(f"  Submitting to AssemblyAI: {youtube_url}")
 
+    config = aai.TranscriptionConfig(
+        speaker_labels=True,
+        language_code=LANGUAGE,
+    )
+    transcriber = aai.Transcriber(config=config)
+    result = transcriber.transcribe(youtube_url)
 
-def fetch_transcript(video_id: str) -> str | None:
-    """Return transcript text, None if permanently unavailable, raise TransientError if temporary."""
-    api = YouTubeTranscriptApi()
-    try:
-        try:
-            transcript = api.fetch(video_id, languages=["en"])
-        except NoTranscriptFound:
-            # English not available — try whatever language is first in the list
-            transcript_list = api.list(video_id)
-            transcript = next(iter(transcript_list)).fetch()
-        return " ".join(snippet.text for snippet in transcript)
-    except IpBlocked as exc:
-        # IpBlocked is a subclass of CouldNotRetrieveTranscript — catch it first
-        raise TransientError("IP blocked by YouTube") from exc
-    except (TranscriptsDisabled, NoTranscriptFound, CouldNotRetrieveTranscript) as exc:
-        print(f"  No captions available: {exc}")
-        return None
-    except requests.RequestException as exc:
-        raise TransientError(f"Network error: {exc}") from exc
-    except Exception as exc:
-        print(f"  Transcript fetch error (skipping): {exc}")
-        return None
+    if result.status == aai.TranscriptStatus.error:
+        msg = result.error or "unknown error"
+        # Permanent failures (video unavailable, no audio track, etc.)
+        if any(k in msg.lower() for k in ("download", "audio", "media", "format", "unavailable")):
+            print(f"  Permanent error — skipping: {msg}")
+            return None
+        # Anything else is potentially transient — let it bubble up
+        raise RuntimeError(f"AssemblyAI error: {msg}")
+
+    if not result.utterances:
+        # Transcription succeeded but produced no speaker segments — return plain text
+        return result.text or ""
+
+    lines = [
+        f"**Speaker {u.speaker}:** {u.text}"
+        for u in result.utterances
+    ]
+    return "\n\n".join(lines)
 
 
 def save_transcript(video: dict, text: str) -> Path:
@@ -150,13 +159,17 @@ def set_github_output(processed: list[dict]) -> None:
 
 
 def main() -> None:
-    channel_id = os.environ.get("CHANNEL_ID", "").strip()
+    api_key = os.environ.get("ASSEMBLYAI_API_KEY", "").strip()
+    if not api_key:
+        print("ERROR: ASSEMBLYAI_API_KEY environment variable is not set.", file=sys.stderr)
+        sys.exit(1)
+    aai.settings.api_key = api_key
 
+    channel_id = os.environ.get("CHANNEL_ID", "").strip()
     if not channel_id:
         config_path = BASE_DIR / "config.json"
         if config_path.exists():
             channel_id = json.loads(config_path.read_text()).get("channel_id", "")
-
     if not channel_id:
         print(
             "ERROR: Set the CHANNEL_ID environment variable or create config.json "
@@ -176,14 +189,13 @@ def main() -> None:
     for video in new_videos:
         print(f"\nProcessing: {video['title']}  ({video['id']})")
         try:
-            transcript = fetch_transcript(video["id"])
-        except TransientError as exc:
+            text = transcribe(video["id"])
+        except Exception as exc:
             print(f"  Transient error — will retry next run: {exc}")
             continue
-        if transcript:
-            save_transcript(video, transcript)
+        if text is not None:
+            save_transcript(video, text)
             processed.append(video)
-        # Mark as seen only after a definitive outcome (success or permanent no-captions)
         seen.add(video["id"])
 
     if new_videos:

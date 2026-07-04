@@ -1,2 +1,2 @@
 requests>=2.31.0
-youtube-transcript-api>=1.0.0
+assemblyai>=0.30.0
