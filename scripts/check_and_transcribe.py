@@ -94,7 +94,7 @@ def slugify(text: str) -> str:
 def download_audio(video_id: str, out_dir: str) -> Path:
     """Download the best available audio track with yt-dlp, return the file path."""
     opts = {
-        "format": "bestaudio/bestvideo+bestaudio/best/bestvideo",
+        "format": "bestaudio/best/18",
         "outtmpl": f"{out_dir}/{video_id}.%(ext)s",
         "quiet": True,
         "no_warnings": True,
